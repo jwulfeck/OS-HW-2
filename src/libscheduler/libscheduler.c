@@ -12,7 +12,7 @@
 /**
   Stores information making up a job to be scheduled including any statistics.
 
-  You may need to define some global variables or a struct to store your job queue elements. 
+  You may need to define some global variables or a struct to store your job queue elements.
 */
 typedef struct _job_t
 {
@@ -21,6 +21,7 @@ typedef struct _job_t
   int endTime;
   int coreAssigned;
   int duration;
+  int firstTimeScheduled;
 
   int scheduleLatency;
   int timeRun;
@@ -34,16 +35,24 @@ priqueue_t* queue;
 scheme_t activeScheme;
 int coreCount;
 int* coreArr;
+int lastUpdate = 0;
+int updatedThisCycle = 0;
 //all comparators should return 1 for A is higher priority
 //-1 for B is higher priority
-int compareFCFS(job_t* a, job_t* b){
+int compareFCFS(const void* aVoid, const void* bVoid){
+  job_t* a = (job_t*)aVoid;
+  job_t* b = (job_t*)bVoid;
   if(a->arrivalTime<b->arrivalTime){
-    return 1;
+    return 1; //a's priority is greater if its arrival time is lower return 1
   }
+  //guaranteed that no two jobs will have equal arrival times, don't need to check
   return -1;
 }
 
-int compareSJF(job_t* a, job_t* b){
+int compareSJF(const void* aVoid, const void* bVoid){
+  job_t* a = (job_t*)aVoid;
+  job_t* b = (job_t*)bVoid;
+
   if (a->duration == b->duration){
     if(a->arrivalTime<b->arrivalTime) return 1; //maybe replace this with a call to compareFCFS? not sure if that works with func pointers
     return -1;
@@ -54,9 +63,12 @@ int compareSJF(job_t* a, job_t* b){
   return -1;
 }
 
-int comparePSJF(job_t* a, job_t* b){
+int comparePSJF(const void* aVoid, const void* bVoid){
+  job_t* a = (job_t*)aVoid;
+  job_t* b = (job_t*)bVoid;
+
   int aRemaining = a->duration-a->timeRun;
-  int bRemaining = a->duration-b->timeRun;
+  int bRemaining = b->duration-b->timeRun;
   if(aRemaining == bRemaining){
     if(a->arrivalTime<b->arrivalTime) return 1;
     return -1;
@@ -65,26 +77,32 @@ int comparePSJF(job_t* a, job_t* b){
   return -1;
 }
 
-int comparePRI(job_t* a, job_t* b){
+int comparePRI(const void* aVoid, const void* bVoid){
+  job_t* a = (job_t*)aVoid;
+  job_t* b = (job_t*)bVoid;
+
   if(a->priority == b->priority){
     if(a->arrivalTime<b->arrivalTime) return 1;
     return -1;
   }
-  if(a->priority>b->priority) return 1;
+  if(a->priority<b->priority) return 1;
   return -1;
 }
 
-int comparePPRI(job_t* a, job_t* b){
+int comparePPRI(const void* aVoid, const void* bVoid){
+  job_t* a = (job_t*)aVoid;
+  job_t* b = (job_t*)bVoid;
+
   if(a->priority == b->priority){
     if(a->arrivalTime<b->arrivalTime) return 1;
     return -1;
   }
-  if(a->priority>b->priority) return 1;
+  if(a->priority<b->priority) return 1;
   return -1;
 }
 
-int compareRR(job_t* a, job_t* b){
-  return 1; //always push to back of queue
+int compareRR(const void* aVoid, const void* bVoid){
+  return -1; //always push to back of queue
 }
 
 
@@ -93,17 +111,22 @@ int compareRR(job_t* a, job_t* b){
 void updateTimes(int time){
   for(int i =0;i<priqueue_size(queue);i++){
     job_t* job = priqueue_at(queue, i);
-    if(job->coreAssigned != -1 || job->endTime == time){
-      job->timeRun = time-job->arrivalTime; 
+    if(job->coreAssigned != -1){
+      job->timeRun++;
     }
-    if(job->scheduleLatency==-1 && job->coreAssigned!=-1){ //if job is scheduled but its schedule latency hasnt been calculated yet, calculate it
-      job->scheduleLatency = time-job->arrivalTime;
+    if (job->scheduleLatency == -1 && job->firstTimeScheduled!=-1){
+      job->scheduleLatency = job->firstTimeScheduled-job->arrivalTime;
     }
+    // if(job->scheduleLatency==-1 && job->coreAssigned!=-1){ //if job is scheduled but its schedule latency hasnt been calculated yet, calculate it
+    //   job->scheduleLatency = time-job->arrivalTime;
+    // }
   }
+  lastUpdate = time;
+
 }
 
 //pull from the priority queue until the cores are full
-void fillIdleCores(){
+void fillIdleCores(int time){
   job_t* curr;
   int found = 0;
   if(priqueue_size(queue)>0){
@@ -116,32 +139,36 @@ void fillIdleCores(){
     }
     while(nextCore!=-1){
       found = 0;
-      for(int i=0;i<priqueue_size(queue);i++){
+      for(int i=priqueue_size(queue)-1;i>=0;i--){
         curr = (job_t*)priqueue_at(queue, i);
         if(!curr->finished&&curr->coreAssigned==-1){
           coreArr[nextCore] = curr->id;
           curr->coreAssigned = nextCore;
+          if (curr->firstTimeScheduled == -1){
+            curr->firstTimeScheduled = time;
+          }
           found = 1;
           break;
         }
       }
       if(!found) break; //if the priqueue doesn't have any jobs to insert we don't need to assign to further cores
+      nextCore = -1;
       for(int i=0;i<coreCount;i++){ //if we're iterating again find a new core to fill
         if(coreArr[i] == -1){
           nextCore = i;
           break;
         }
       }
-
     }
   }
 }
 //fill idle cores and preempt lower-priority jobs already running
 void preemptCores(int time){
+
   if(priqueue_size(queue)>0){
     for(int i =0;i<priqueue_size(queue);i++){
       job_t* curr = priqueue_at(queue, i);
-      if(curr->coreAssigned!=-1 && !curr->finished){
+      if(curr->coreAssigned==-1 && !curr->finished){
         int nextCore = -1;
         for(int i=0;i<coreCount;i++){
           if(coreArr[i] ==-1){
@@ -150,26 +177,36 @@ void preemptCores(int time){
           }
         }
         if(nextCore == -1){ //preempt
+          int coreToPreempt = 9999;
           job_t* jobToPreempt = NULL;
-          for(int i =0;i<priqueue_size(queue);i++){
-            jobToPreempt = priqueue_at(queue, i);
-            if(jobToPreempt->coreAssigned!=-1 && queue->compare(jobToPreempt, curr) == 1){ //check this condition
-              break; //found job to preempt
+          for(int i =priqueue_size(queue)-1;i>=0;i--){
+            job_t* currJobToPreempt = priqueue_at(queue, i);
+            if(currJobToPreempt->coreAssigned!=-1 && queue->compare(currJobToPreempt, curr) == -1){
+              if (currJobToPreempt->coreAssigned<coreToPreempt){
+                jobToPreempt = currJobToPreempt;
+              }
             }
           }
           if(jobToPreempt!=NULL){
+            if (curr->firstTimeScheduled == -1){
+              curr->firstTimeScheduled = time;
+            }
             curr->coreAssigned = jobToPreempt->coreAssigned;
             jobToPreempt->coreAssigned = -1;
             coreArr[curr->coreAssigned] = curr->id;
-            jobToPreempt->timeRun = time-jobToPreempt->arrivalTime;
-            if(jobToPreempt->timeRun == 0){ 
+            //jobToPreempt->timeRun = time-jobToPreempt->arrivalTime;
+            if(jobToPreempt->timeRun == 0){
+
               jobToPreempt->scheduleLatency = -1;
             }
           }
         }
-        else{ //idle core found 
+        else{ //idle core found
           curr->coreAssigned = nextCore;
           coreArr[nextCore] = curr->id;
+          if(curr->firstTimeScheduled == -1){
+            curr->firstTimeScheduled = time;
+          }
         }
       }
     }
@@ -179,11 +216,11 @@ void preemptCores(int time){
 void reschedule(int time){
   switch(activeScheme){
     case FCFS:{
-      fillIdleCores();
+      fillIdleCores(time);
       break;
     }
     case SJF:{
-      fillIdleCores();
+      fillIdleCores(time);
       break;
     }
     case PSJF:{
@@ -191,7 +228,7 @@ void reschedule(int time){
       break;
     }
     case PRI:{
-      fillIdleCores();
+      fillIdleCores(time);
       break;
     }
     case PPRI:{
@@ -199,7 +236,7 @@ void reschedule(int time){
       break;
     }
     case RR:{
-      fillIdleCores();
+      fillIdleCores(time);
       break;
     }
   }
@@ -209,7 +246,7 @@ void reschedule(int time){
 
 /**
   Initalizes the scheduler.
- 
+
   Assumptions:
     - You may assume this will be the first scheduler function called.
     - You may assume this function will be called once once.
@@ -222,7 +259,7 @@ void reschedule(int time){
 void scheduler_start_up(int cores, scheme_t scheme)
 {
   queue = malloc(sizeof(priqueue_t));
-  
+
   coreCount = cores;
   coreArr = malloc(coreCount*sizeof(int));
   for(int i=0;i<coreCount;i++){
@@ -262,7 +299,7 @@ void scheduler_start_up(int cores, scheme_t scheme)
 
 /**
   Called when a new job arrives.
- 
+
   If multiple cores are idle, the job should be assigned to the core with the
   lowest id.
   If the job arriving should be scheduled to run during the next
@@ -277,8 +314,8 @@ void scheduler_start_up(int cores, scheme_t scheme)
   @param running_time the total number of time units this job will run before it will be finished.
   @param priority the priority of the job. (The lower the value, the higher the priority.)
   @return index of core job should be scheduled on
-  @return -1 if no scheduling changes should be made. 
- 
+  @return -1 if no scheduling changes should be made.
+
  */
 int scheduler_new_job(int job_number, int time, int running_time, int priority)
 {
@@ -292,14 +329,14 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
   newJob->endTime = -1;
   newJob->timeRun = 0;
   newJob->finished = 0;
-  newJob->scheduleLatency = -1; 
+  newJob->scheduleLatency = -1;
   newJob->coreAssigned = -1;
+  newJob->firstTimeScheduled = -1;
 
   priqueue_offer(queue, newJob);
 
   reschedule(time);
   updateTimes(time);
-
 	return newJob->coreAssigned;
 }
 
@@ -307,12 +344,12 @@ int scheduler_new_job(int job_number, int time, int running_time, int priority)
 
 /**
   Called when a job has completed execution.
- 
+
   The core_id, job_number and time parameters are provided for convenience. You may be able to calculate the values with your own data structure.
   If any job should be scheduled to run on the core free'd up by the
   finished job, return the job_number of the job that should be scheduled to
   run on core core_id.
- 
+
   @param core_id the zero-based index of the core where the job was located.
   @param job_number a globally unique identification number of the job.
   @param time the current time of the simulator.
@@ -343,19 +380,34 @@ int scheduler_job_finished(int core_id, int job_number, int time)
 /**
   When the scheme is set to RR, called when the quantum timer has expired
   on a core.
- 
+
   If any job should be scheduled to run on the core free'd up by
   the quantum expiration, return the job_number of the job that should be
   scheduled to run on core core_id.
 
   @param core_id the zero-based index of the core where the quantum has expired.
-  @param time the current time of the simulator. 
+  @param time the current time of the simulator.
   @return job_number of the job that should be scheduled on core cord_id
   @return -1 if core should remain idle
  */
 int scheduler_quantum_expired(int core_id, int time)
 {
-	return -1;
+  int targetJob = coreArr[core_id];
+  job_t* preemptedJob = NULL;
+	for(int i=0;i<priqueue_size(queue);i++){
+    if(((job_t*)priqueue_at(queue, i))->id == targetJob){
+      preemptedJob = (job_t*)priqueue_at(queue, i);
+    }
+  }
+  if (preemptedJob == NULL) return coreArr[core_id];
+  preemptedJob->coreAssigned = -1;
+  coreArr[core_id] = -1;
+  priqueue_remove(queue, preemptedJob); //rr moves all new items to the back
+  priqueue_offer(queue, preemptedJob); //move the job to be preempted to the back
+
+  reschedule(time); //get a new job on the freed core
+
+  return coreArr[core_id];
 }
 
 
@@ -409,6 +461,7 @@ float scheduler_average_response_time()
   float sum = 0;
   for(int i =0;i<priqueue_size(queue);i++){
     job_t* job = priqueue_at(queue, i);
+
     sum += job->scheduleLatency;
   }
   return sum/priqueue_size(queue);
@@ -418,7 +471,7 @@ float scheduler_average_response_time()
 
 /**
   Free any memory associated with your scheduler.
- 
+
   Assumptions:
     - This function will be the last function called in your library.
 */
@@ -434,12 +487,17 @@ void scheduler_clean_up()
   makes to your scheduler.
   In our provided output, we have implemented this function to list the jobs in the order they are to be scheduled. Furthermore, we have also listed the current state of the job (either running on a given core or idle). For example, if we have a non-preemptive algorithm and job(id=4) has began running, job(id=2) arrives with a higher priority, and job(id=1) arrives with a lower priority, the output in our sample output will be:
 
-    2(-1) 4(0) 1(-1)  
-  
+    2(-1) 4(0) 1(-1)
+
   This function is not required and will not be graded. You may leave it
   blank if you do not find it useful.
  */
 void scheduler_show_queue()
 {
-
+  for(int i=priqueue_size(queue)-1;i>=0;i--){
+    job_t* currJob = (job_t*)priqueue_at(queue, i);
+    if(!currJob->finished){
+      printf("%d ", currJob->id);
+    }
+  }
 }

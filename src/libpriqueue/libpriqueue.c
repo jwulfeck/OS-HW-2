@@ -9,7 +9,7 @@
 
 /**
   Initializes the priqueue_t data structure.
-  
+
   Assumtions
     - You may assume this function will only be called once per instance of priqueue_t
     - You may assume this function will be the first function called using an instance of priqueue_t.
@@ -57,7 +57,7 @@ int priqueue_offer(priqueue_t *q, void *ptr)
         int res = q->compare(ptr, q->qArr[i]); //comparators should return -1 if b is lower priority than a
         //found ptr's spot, insert it
         if(res<0){
-          placed = 1;        
+          placed = 1;
           newArr[newArrIndex] = ptr;
           placedIndex = newArrIndex;
           newArrIndex++;
@@ -86,7 +86,7 @@ int priqueue_offer(priqueue_t *q, void *ptr)
 /**
   Retrieves, but does not remove, the head of this queue, returning NULL if
   this queue is empty.
- 
+
   @param q a pointer to an instance of the priqueue_t data structure
   @return pointer to element at the head of the queue
   @return NULL if the queue is empty
@@ -101,7 +101,7 @@ void *priqueue_peek(priqueue_t *q)
 /**
   Retrieves and removes the head of this queue, or NULL if this queue
   is empty.
- 
+
   @param q a pointer to an instance of the priqueue_t data structure
   @return the head of this queue
   @return NULL if this queue is empty
@@ -112,7 +112,7 @@ void *priqueue_poll(priqueue_t *q)
   void* ret = q->qArr[0];
   if(q->size==1){
     q->size--;
-    free(q->qArr);    
+    free(q->qArr);
     return ret;
   }
   //move everything forward
@@ -122,7 +122,7 @@ void *priqueue_poll(priqueue_t *q)
     newArr[i] = q->qArr[i+1];
   }
   free(q->qArr);
-  q->qArr = newArr;  
+  q->qArr = newArr;
   q->size = newSize;
   return ret;
 
@@ -132,7 +132,7 @@ void *priqueue_poll(priqueue_t *q)
 /**
   Returns the element at the specified position in this list, or NULL if
   the queue does not contain an index'th element.
- 
+
   @param q a pointer to an instance of the priqueue_t data structure
   @param index position of retrieved element
   @return the index'th element in the queue
@@ -142,15 +142,15 @@ void *priqueue_at(priqueue_t *q, int index)
 {
   if(index>=q->size || index<0) return NULL;
   return q->qArr[index];
-  
+
 }
 
 
 /**
-  Removes all instances of ptr from the queue. 
-  
+  Removes all instances of ptr from the queue.
+
   This function should not use the comparer function, but check if the data contained in each element of the queue is equal (==) to ptr.
- 
+
   @param q a pointer to an instance of the priqueue_t data structure
   @param ptr address of element to be removed
   @return the number of entries removed
@@ -161,7 +161,7 @@ int priqueue_remove(priqueue_t *q, void *ptr)
   for(int i =0;i<q->size;i++){
     if(q->qArr[i]==ptr){
       count++;
-    } 
+    }
   }
   if (count==0) return 0;
   if (count==q->size){
@@ -178,7 +178,7 @@ int priqueue_remove(priqueue_t *q, void *ptr)
       newArrIndex++;
     }
   }
-  free(q->qArr);  
+  free(q->qArr);
   q->size -= count;
   q->qArr = newArr;
 	return count;
@@ -188,7 +188,7 @@ int priqueue_remove(priqueue_t *q, void *ptr)
 /**
   Removes the specified index from the queue, moving later elements up
   a spot in the queue to fill the gap.
- 
+
   @param q a pointer to an instance of the priqueue_t data structure
   @param index position of element to be removed
   @return the element removed from the queue
@@ -200,7 +200,7 @@ void *priqueue_remove_at(priqueue_t *q, int index)
   if(q->qArr==NULL) return NULL;
   if(index>=q->size || index<0) return NULL;
   ret = q->qArr[index];
-  
+
   void** newArr = malloc(sizeof(void*[q->size-1]));
   if(index == q->size-1){
     for(int i =0;i<q->size-1;i++){
@@ -226,7 +226,7 @@ void *priqueue_remove_at(priqueue_t *q, int index)
 
 /**
   Returns the number of elements in the queue.
- 
+
   @param q a pointer to an instance of the priqueue_t data structure
   @return the number of elements in the queue
  */
@@ -238,7 +238,7 @@ int priqueue_size(priqueue_t *q)
 
 /**
   Destroys and frees all the memory associated with q.
-  
+
   @param q a pointer to an instance of the priqueue_t data structure
  */
 void priqueue_destroy(priqueue_t *q)
